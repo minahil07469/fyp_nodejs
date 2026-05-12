@@ -1,0 +1,563 @@
+import 'package:flutter/material.dart';
+import '../../core/app_nav.dart';
+
+class ProgressScreen extends StatefulWidget {
+  const ProgressScreen({super.key});
+
+  @override
+  State<ProgressScreen> createState() => _ProgressScreenState();
+}
+
+class _ProgressScreenState extends State<ProgressScreen> {
+  int _tabIndex    = 0; // 0=Last session, 1=Week, 2=Month, 3=6 months
+  int _skillTab    = 2; // 0=Coach, 1=Therapist, 2=Both (default)
+  int _navIndex    = 1; // Progress active
+
+  static const Color kBg       = Color(0xFFF5F0FF);
+  static const Color kHeader   = Color(0xFF290451);
+  static const Color kPrimary  = Color(0xFF5B2DD9);
+  static const Color kGreen    = Color(0xFFC8F55A);
+  static const Color kGreenDk  = Color(0xFF2A3D00);
+  static const Color kCardBg   = Color(0xFFFFFFFF);
+  static const Color kSubtitle = Color(0xFF999999);
+  static const Color kAICard   = Color(0xFF290451);
+  static const Color kNavBg    = Color(0xFFF0EAFF);
+  static const Color kNavActive= Color(0xFF5B2DD9);
+  static const Color kNavInact = Color(0xFFAAAAAA);
+
+  static const _tabs = ['Last session', 'Week', 'Month', '6 months'];
+
+  // Bar chart data per tab [Pronun, Fluency, Clarity, Pacing]
+  static const _chartData = [
+    [0.80, 0.68, 0.74, 0.65], // Last session
+    [0.72, 0.60, 0.68, 0.58], // Week
+    [0.85, 0.75, 0.80, 0.70], // Month
+    [0.90, 0.82, 0.88, 0.78], // 6 months
+  ];
+
+  static const _barColors = [
+    Color(0xFF5B2DD9),
+    Color(0xFF7C52E8),
+    Color(0xFF9D7AF0),
+    Color(0xFFBBA8F7),
+  ];
+
+  static const _barLabels = ['Pronun.', 'Fluency', 'Clarity', 'Pacing'];
+
+  @override
+  Widget build(BuildContext context) {
+    final data = _chartData[_tabIndex];
+
+    return Scaffold(
+      backgroundColor: kBg,
+      bottomNavigationBar: _buildBottomNav(),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              // ── Header ──────────────────────────────────────────────
+              _buildHeader(),
+
+              const SizedBox(height: 16),
+
+              // ── Stats grid ───────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Column(
+                  children: [
+                    // Row 1: Sessions + Avg score
+                    Row(
+                      children: [
+                        Expanded(child: _StatCard(
+                          value: '1',
+                          label: 'Sessions',
+                          valueColor: kPrimary,
+                        )),
+                        const SizedBox(width: 12),
+                        Expanded(child: _StatCard(
+                          value: '76%',
+                          label: 'Avg score',
+                          valueColor: kPrimary,
+                        )),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    // Row 2: Practice time + Day streak
+                    Row(
+                      children: [
+                        Expanded(child: _StatCard(
+                          value: '46 min',
+                          label: 'Practice time',
+                          valueColor: kPrimary,
+                          valueFontSize: 20,
+                        )),
+                        const SizedBox(width: 12),
+                        Expanded(child: _StatCard(
+                          value: '7',
+                          label: 'Day streak',
+                          valueColor: kGreenDk,
+                          labelColor: const Color(0xFF4A5E00),
+                          bgColor: kGreen,
+                        )),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── Speech skills chart card ──────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: kCardBg,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+                  child: Column(
+                    children: [
+                      // Title + Coach/Therapist toggle
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Speech skills',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: kPrimary,
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              _SkillTab(
+                                label: 'Both',
+                                active: _skillTab == 2,
+                                onTap: () => setState(() => _skillTab = 2),
+                              ),
+                              const SizedBox(width: 6),
+                              _SkillTab(
+                                label: 'Coach',
+                                active: _skillTab == 0,
+                                onTap: () => setState(() => _skillTab = 0),
+                              ),
+                              const SizedBox(width: 6),
+                              _SkillTab(
+                                label: 'Therapist',
+                                active: _skillTab == 1,
+                                onTap: () => setState(() => _skillTab = 1),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 16),
+
+                      // Bar chart
+                      SizedBox(
+                        height: 200,
+                        child: _BarChart(
+                          values: data,
+                          colors: _barColors,
+                          labels: _barLabels,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              // ── AI insight card ───────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+                  decoration: BoxDecoration(
+                    color: kAICard,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Green chart icon
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: kGreen.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: kGreen, width: 2),
+                        ),
+                        child: const Icon(
+                          Icons.show_chart_rounded,
+                          color: kGreen,
+                          size: 18,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          '"Fluency up 12% this month. Keep up that daily habit — it\'s working."',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFFE8E0FF),
+                            height: 1.5,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Header ─────────────────────────────────────────────────────────────────
+  Widget _buildHeader() {
+    return Container(
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: kHeader,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(40),
+          bottomRight: Radius.circular(40),
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Your progress',
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+              color: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 2),
+          const Text(
+            "See how far you've come",
+            style: TextStyle(fontSize: 12, color: Color(0xFFB9A8E8)),
+          ),
+          const SizedBox(height: 14),
+          // Tab row
+          Row(
+            children: List.generate(_tabs.length, (i) {
+              final active = _tabIndex == i;
+              return GestureDetector(
+                onTap: () => setState(() => _tabIndex = i),
+                child: Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: active
+                        ? const Color(0xFFC8F55A)
+                        : Colors.white.withOpacity(0.14),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    _tabs[i],
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: active
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                      color: active
+                          ? const Color(0xFF1A1A1A)
+                          : Colors.white,
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Bottom nav ─────────────────────────────────────────────────────────────
+  Widget _buildBottomNav() {
+    final items = [
+      (Icons.home_outlined,         'Home'),
+      (Icons.show_chart_rounded,    'Progress'),
+      (Icons.headset_mic_outlined,  'Support'),
+      (Icons.person_outline_rounded,'Profile'),
+    ];
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: kNavBg,
+        border: Border(top: BorderSide(color: Color(0xFFE0D6FF), width: 1)),
+      ),
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: List.generate(items.length, (i) {
+          final active = _navIndex == i;
+          final color  = active ? kNavActive : kNavInact;
+          return GestureDetector(
+            onTap: () => navigateTo(context, i),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(items[i].$1, color: color, size: 22),
+                const SizedBox(height: 3),
+                Text(
+                  items[i].$2,
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight:
+                        active ? FontWeight.w700 : FontWeight.w400,
+                    color: color,
+                  ),
+                ),
+                if (active) ...[
+                  const SizedBox(height: 2),
+                  Container(
+                    width: 4,
+                    height: 4,
+                    decoration: const BoxDecoration(
+                      color: kNavActive,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+}
+
+// ── Stat card ──────────────────────────────────────────────────────────────────
+class _StatCard extends StatelessWidget {
+  final String value;
+  final String label;
+  final Color valueColor;
+  final Color? labelColor;
+  final Color? bgColor;
+  final double valueFontSize;
+
+  const _StatCard({
+    required this.value,
+    required this.label,
+    required this.valueColor,
+    this.labelColor,
+    this.bgColor,
+    this.valueFontSize = 24,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 16),
+      decoration: BoxDecoration(
+        color: bgColor ?? Colors.white,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        children: [
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: valueFontSize,
+              fontWeight: FontWeight.w700,
+              color: valueColor,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              color: labelColor ?? const Color(0xFF999999),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Skill tab toggle ───────────────────────────────────────────────────────────
+class _SkillTab extends StatelessWidget {
+  final String label;
+  final bool active;
+  final VoidCallback onTap;
+
+  static const Color kPrimary = Color(0xFF5B2DD9);
+
+  const _SkillTab(
+      {required this.label, required this.active, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: active ? kPrimary : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: active
+              ? null
+              : Border.all(color: const Color(0xFFE0D6FF), width: 1.5),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: active ? FontWeight.w700 : FontWeight.w400,
+            color: active ? Colors.white : kPrimary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ── Bar chart ──────────────────────────────────────────────────────────────────
+class _BarChart extends StatelessWidget {
+  final List<double> values;
+  final List<Color> colors;
+  final List<String> labels;
+
+  const _BarChart({
+    required this.values,
+    required this.colors,
+    required this.labels,
+  });
+
+  static const _yLabels = ['100%', '75%', '50%', '25%', '0%'];
+  static const _yValues = [1.0, 0.75, 0.50, 0.25, 0.0];
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Y-axis labels
+        Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: _yLabels
+              .map((l) => Text(l,
+                  style: const TextStyle(
+                      fontSize: 10, color: Color(0xFFAAAAAA))))
+              .toList(),
+        ),
+        const SizedBox(width: 8),
+        // Chart area
+        Expanded(
+          child: Column(
+            children: [
+              Expanded(
+                child: LayoutBuilder(builder: (ctx, constraints) {
+                  final chartH = constraints.maxHeight;
+                  final chartW = constraints.maxWidth;
+                  final barW   = (chartW - (values.length - 1) * 12) /
+                      values.length;
+
+                  return Stack(
+                    children: [
+                      // Grid lines
+                      ..._yValues.map((v) {
+                        final y = chartH * (1 - v);
+                        return Positioned(
+                          top: y,
+                          left: 0,
+                          right: 0,
+                          child: Container(
+                            height: 1,
+                            color: const Color(0xFFF0EAFF),
+                          ),
+                        );
+                      }),
+
+                      // Bars
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: List.generate(values.length, (i) {
+                          final barH = chartH * values[i];
+                          final pct  =
+                              '${(values[i] * 100).round()}%';
+                          return Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(
+                                  right: i < values.length - 1 ? 12 : 0),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    pct,
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                      color: colors[i],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  AnimatedContainer(
+                                    duration:
+                                        const Duration(milliseconds: 400),
+                                    curve: Curves.easeOut,
+                                    height: barH - 20,
+                                    decoration: BoxDecoration(
+                                      color: colors[i],
+                                      borderRadius: const BorderRadius.only(
+                                        topLeft: Radius.circular(6),
+                                        topRight: Radius.circular(6),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                    ],
+                  );
+                }),
+              ),
+              const SizedBox(height: 6),
+              // X-axis labels
+              Row(
+                children: List.generate(labels.length, (i) => Expanded(
+                  child: Padding(
+                    padding: EdgeInsets.only(
+                        right: i < labels.length - 1 ? 12 : 0),
+                    child: Text(
+                      labels[i],
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 10, color: Color(0xFF888888)),
+                    ),
+                  ),
+                )),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
