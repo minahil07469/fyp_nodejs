@@ -1,80 +1,159 @@
-import 'package:flutter/foundation.dart' show kIsWeb, ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'dart:io' show Platform, File, Directory;
-import 'dart:convert' show json;
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:google_sign_in/google_sign_in.dart';
-import 'package:http/http.dart' as http;
+import 'dart:convert' show jsonEncode, jsonDecode;
+import '../services/api_service.dart';
 
 class AuthService {
-  // ── Platform check ─────────────────────────────────────────────────────────
-  static bool get isSupported =>
-      kIsWeb || Platform.isAndroid || Platform.isIOS;
+  // ── Session state ──────────────────────────────────────────────────────────
+  static String? _loggedInEmail;
+  static String? get currentEmail => _loggedInEmail;
 
-  // Firebase Web API key — used for REST calls on Windows desktop
-  static const String _firebaseApiKey = 'AIzaSyCUouygu_B1KTQGUZRZYKwkUK3oGjx40Xs';
+  static final ValueNotifier<bool> isLoggedInNotifier = ValueNotifier(false);
 
-  static FirebaseAuth get _auth => FirebaseAuth.instance;
-  static final GoogleSignIn _googleSignIn = GoogleSignIn();
-
-  // ── Windows-only: local registry ───────────────────────────────────────────
-  static final Map<String, String> _registeredUsers = {};
-  static String? _windowsLoggedInEmail;
-
-  static String? get windowsEmail => _windowsLoggedInEmail;
-
-  // ── Global name notifier — Profile & Home listen to this ──────────────────
+  // ── Global name notifier ───────────────────────────────────────────────────
   static final ValueNotifier<String> displayNameNotifier =
       ValueNotifier<String>('User');
 
-  // ── Current user ───────────────────────────────────────────────────────────
-  static User? get currentUser => isSupported ? _auth.currentUser : null;
-  static Stream<User?> get authStateChanges =>
-      isSupported ? _auth.authStateChanges() : Stream.value(null);
+  // ── Selected avatar notifier ───────────────────────────────────────────────
+  static final ValueNotifier<String> avatarNotifier =
+      ValueNotifier<String>('assets/avator/avator1.png');
 
-  // ── Email verified check ───────────────────────────────────────────────────
-  static bool get isEmailVerified {
-    if (!isSupported) return true; // Windows local — skip verification
-    return _auth.currentUser?.emailVerified ?? false;
+  static Future<void> updateAvatar(String assetPath) async {
+    avatarNotifier.value = assetPath;
+    try {
+      await _fileIn('avatar.txt').writeAsString(assetPath);
+    } catch (_) {}
   }
 
-  // ── Display name persistence (dart:io — no extra package needed) ───────────
+  static Future<void> _loadAvatar() async {
+    try {
+      final file = _fileIn('avatar.txt');
+      if (await file.exists()) {
+        final saved = (await file.readAsString()).trim();
+        if (saved.isNotEmpty) avatarNotifier.value = saved;
+      }
+    } catch (_) {}
+  }
+
   static String? _cachedDisplayName;
 
-  static File _nameFile() {
-    String dir;
+  // ── App data directory ─────────────────────────────────────────────────────
+  static String _appDir() {
     try {
       if (Platform.isWindows) {
-        final appData = Platform.environment['APPDATA'] ?? '.';
-        dir = '$appData\\fyp_app';
+        final localApp = Platform.environment['LOCALAPPDATA'];
+        if (localApp != null && localApp.isNotEmpty) {
+          final dir = '$localApp\\Speakora';
+          Directory(dir).createSync(recursive: true);
+          return dir;
+        }
       } else if (Platform.isLinux || Platform.isMacOS) {
         final home = Platform.environment['HOME'] ?? '.';
-        dir = '$home/.fyp_app';
-      } else {
-        dir = '.';
+        final dir = '$home/.speakora';
+        Directory(dir).createSync(recursive: true);
+        return dir;
       }
-      Directory(dir).createSync(recursive: true);
-    } catch (_) {
-      dir = '.';
-    }
-    return File('$dir${Platform.pathSeparator}display_name.txt');
+    } catch (_) {}
+    return '.';
   }
+
+  static File _fileIn(String name) {
+    final dir = _appDir();
+    try {
+      if (dir != '.') Directory(dir).createSync(recursive: true);
+    } catch (_) {}
+    return File('$dir${Platform.pathSeparator}$name');
+  }
+
+  // ── File shortcuts ─────────────────────────────────────────────────────────
+  static File _nameFile()    => _fileIn('display_name.txt');
+  static File _sessionFile() => _fileIn('session.json');
+
+  // ── Profile setup flag ────────────────────────────────────────────────────
+  static bool _profileSetupDone = false;
+  static bool get profileSetupDone => _profileSetupDone;
+
+  static Future<void> markProfileSetupDone() async {
+    _profileSetupDone = true;
+    await _updateSessionProfileFlag(true);
+  }
+
+  static Future<void> _updateSessionProfileFlag(bool done) async {
+    try {
+      final file = _sessionFile();
+      if (!await file.exists()) return;
+      final raw  = await file.readAsString();
+      final data = jsonDecode(raw) as Map<String, dynamic>;
+      data['profileSetupDone'] = done;
+      await file.writeAsString(jsonEncode(data));
+    } catch (_) {}
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // REMEMBER ME — session save / load / clear
+  // ══════════════════════════════════════════════════════════════════════════
+
+  static Future<void> _saveSession({
+    required String email,
+    required String token,
+    required String name,
+  }) async {
+    try {
+      final file = _sessionFile();
+      final content = jsonEncode({
+        'email':            email,
+        'token':            token,
+        'name':             name,
+        'profileSetupDone': _profileSetupDone,
+      });
+      await file.writeAsString(content);
+    } catch (e) {
+      // ignore silently
+    }
+  }
+
+  /// Checks session file on app start — auto-login if session exists.
+  static Future<void> loadSavedSession() async {
+    await _loadAvatar();
+    try {
+      final file = _sessionFile();
+      if (!await file.exists()) return;
+      final data = jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+      final email = data['email'] as String? ?? '';
+      final token = data['token'] as String? ?? '';
+      final name  = data['name']  as String? ?? '';
+      _profileSetupDone = data['profileSetupDone'] as bool? ?? false;
+      if (email.isEmpty || token.isEmpty) return;
+
+      _loggedInEmail = email;
+      ApiService.restoreToken(token);
+      if (name.isNotEmpty) {
+        _cachedDisplayName = name;
+        displayNameNotifier.value = name;
+      } else {
+        syncDisplayName();
+      }
+      isLoggedInNotifier.value = true;
+    } catch (_) {}
+  }
+
+  static Future<void> _clearSession() async {
+    try {
+      final file = _sessionFile();
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // DISPLAY NAME
+  // ══════════════════════════════════════════════════════════════════════════
 
   static String get displayName {
     if (_cachedDisplayName != null && _cachedDisplayName!.trim().isNotEmpty) {
       return _cachedDisplayName!;
     }
-    if (!isSupported) {
-      if (_windowsLoggedInEmail != null) {
-        return _extractFirstName(_windowsLoggedInEmail!);
-      }
-      return 'User';
-    }
-    final user = _auth.currentUser;
-    if (user == null) return 'User';
-    if (user.displayName != null && user.displayName!.trim().isNotEmpty) {
-      return user.displayName!.trim();
-    }
-    return _extractFirstName(user.email ?? 'User');
+    if (_loggedInEmail != null) return _extractFirstName(_loggedInEmail!);
+    return 'User';
   }
 
   static Future<void> loadSavedDisplayName() async {
@@ -105,13 +184,7 @@ class AuthService {
     if (trimmed.isEmpty) return;
     _cachedDisplayName = trimmed;
     displayNameNotifier.value = trimmed;
-    try {
-      await _nameFile().writeAsString(trimmed);
-    } catch (_) {}
-    if (isSupported && _auth.currentUser != null) {
-      await _auth.currentUser!.updateDisplayName(trimmed);
-      await _auth.currentUser!.reload();
-    }
+    try { await _nameFile().writeAsString(trimmed); } catch (_) {}
   }
 
   static void syncDisplayName() {
@@ -152,7 +225,7 @@ class AuthService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SIGN UP — creates account + sends verification email
+  // SIGN UP
   // ══════════════════════════════════════════════════════════════════════════
   static Future<String?> signUp({
     required String email,
@@ -167,143 +240,69 @@ class AuthService {
     final confirmErr = validateConfirmPassword(password, confirmPassword);
     if (confirmErr != null) return confirmErr;
 
-    final normalised = email.trim().toLowerCase();
-    final trimmedName = name.trim();
+    final error = await ApiService.signup(
+      email.trim().toLowerCase(),
+      password.trim(),
+      name: name.trim(),
+    );
 
-    if (!isSupported) {
-      // Windows local path — no email verification
-      if (_registeredUsers.containsKey(normalised)) {
-        return 'An account already exists with this email. Please log in.';
-      }
-      _registeredUsers[normalised] = password.trim();
-      if (trimmedName.isNotEmpty) await updateDisplayName(trimmedName);
-      return null;
+    if (error == null && name.trim().isNotEmpty) {
+      await updateDisplayName(name.trim());
     }
-
-    try {
-      final credential = await _auth.createUserWithEmailAndPassword(
-        email: normalised,
-        password: password.trim(),
-      );
-
-      // Save display name
-      if (trimmedName.isNotEmpty) {
-        await credential.user?.updateDisplayName(trimmedName);
-        await credential.user?.reload();
-        await updateDisplayName(trimmedName);
-      }
-
-      // Send verification email
-      await credential.user?.sendEmailVerification();
-
-      // Sign out immediately — user must verify before logging in
-      await _auth.signOut();
-
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return _errorMessage(e.code);
-    } catch (_) {
-      return 'An unexpected error occurred. Please try again.';
-    }
+    return error;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // SEND VERIFICATION EMAIL  (resend from verification screen)
-  // ══════════════════════════════════════════════════════════════════════════
-  /// Signs in temporarily, sends verification email, then signs out.
-  static Future<String?> resendVerificationEmail({
-    required String email,
-    required String password,
-  }) async {
-    if (!isSupported) return null;
-    try {
-      final credential = await _auth.signInWithEmailAndPassword(
-        email: email.trim().toLowerCase(),
-        password: password.trim(),
-      );
-      if (credential.user?.emailVerified ?? false) {
-        return 'already-verified';
-      }
-      await credential.user?.sendEmailVerification();
-      await _auth.signOut();
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return _errorMessage(e.code);
-    } catch (_) {
-      return 'Failed to resend. Please try again.';
-    }
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // LOGIN — blocks unverified emails
+  // LOGIN
   // ══════════════════════════════════════════════════════════════════════════
   static Future<String?> login({
     required String email,
     required String password,
+    bool rememberMe = false,
   }) async {
     if (email.trim().isEmpty) return 'Email is required.';
     if (password.isEmpty) return 'Password is required.';
-
     final emailErr = validateEmail(email);
     if (emailErr != null) return emailErr;
 
-    final normalised = email.trim().toLowerCase();
+    // Temp variables to capture from callback
+    String _savedToken = '';
+    String _savedName  = '';
+    String _savedEmail = '';
 
-    if (!isSupported) {
-      if (!_registeredUsers.containsKey(normalised)) {
-        return 'No account found with this email. Please sign up first.';
-      }
-      if (_registeredUsers[normalised] != password.trim()) {
-        return 'Incorrect password. Please try again.';
-      }
-      _windowsLoggedInEmail = normalised;
-      return null;
-    }
+    final error = await ApiService.login(
+      email.trim().toLowerCase(),
+      password.trim(),
+      onSuccess: (token, name, userEmail) async {
+        _savedToken = token;
+        _savedName  = name;
+        _savedEmail = userEmail;
+        _loggedInEmail = userEmail;
+        if (name.isNotEmpty) {
+          await updateDisplayName(name);
+        } else {
+          syncDisplayName();
+        }
+        isLoggedInNotifier.value = true;
+      },
+    );
 
-    try {
-      final credential = await _auth.signInWithEmailAndPassword(
-        email: normalised,
-        password: password.trim(),
+    if (error == null && rememberMe && _savedEmail.isNotEmpty) {
+      await _saveSession(
+        email: _savedEmail,
+        token: _savedToken,
+        name:  _savedName,
       );
-
-      // Block login if email not verified
-      if (!(credential.user?.emailVerified ?? false)) {
-        await _auth.signOut();
-        return 'email-not-verified';
-      }
-
-      syncDisplayName();
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return _errorMessage(e.code);
-    } catch (_) {
-      return 'An unexpected error occurred. Please try again.';
     }
+
+    return error;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // GOOGLE SIGN-IN
   // ══════════════════════════════════════════════════════════════════════════
   static Future<String?> signInWithGoogle() async {
-    if (!isSupported) {
-      return 'Google Sign-In is only available on Android and iOS.';
-    }
-    try {
-      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
-      if (googleUser == null) return 'Google sign-in was cancelled.';
-      final GoogleSignInAuthentication googleAuth =
-          await googleUser.authentication;
-      final credential = GoogleAuthProvider.credential(
-        accessToken: googleAuth.accessToken,
-        idToken: googleAuth.idToken,
-      );
-      await _auth.signInWithCredential(credential);
-      return null;
-    } on FirebaseAuthException catch (e) {
-      return _errorMessage(e.code);
-    } catch (_) {
-      return 'Google sign-in failed. Please try again.';
-    }
+    return 'Google Sign-In is not available in this version.';
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -320,43 +319,39 @@ class AuthService {
 
     final passErr = validatePassword(newPassword);
     if (passErr != null) return passErr;
-
     if (newPassword != confirmPassword) return 'Passwords do not match.';
-
     if (currentPassword == newPassword) {
       return 'New password must be different from current password.';
     }
+    if (_loggedInEmail == null) return 'You must be logged in to change password.';
 
-    if (!isSupported) {
-      final email = _windowsLoggedInEmail;
-      if (email == null) return 'You must be logged in to change password.';
-      if (_registeredUsers[email] != currentPassword.trim()) {
-        return 'Current password is incorrect.';
-      }
-      _registeredUsers[email] = newPassword.trim();
-      return null;
-    }
+    return await ApiService.changePassword(
+      email:           _loggedInEmail!,
+      currentPassword: currentPassword.trim(),
+      newPassword:     newPassword.trim(),
+    );
+  }
 
-    try {
-      final user = _auth.currentUser;
-      if (user == null || user.email == null) {
-        return 'You must be logged in to change password.';
-      }
-      final credential = EmailAuthProvider.credential(
-        email: user.email!,
-        password: currentPassword.trim(),
-      );
-      await user.reauthenticateWithCredential(credential);
-      await user.updatePassword(newPassword.trim());
-      return null;
-    } on FirebaseAuthException catch (e) {
-      if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
-        return 'Current password is incorrect.';
-      }
-      return _errorMessage(e.code);
-    } catch (_) {
-      return 'An unexpected error occurred. Please try again.';
-    }
+  // ══════════════════════════════════════════════════════════════════════════
+  // RESET PASSWORD
+  // ══════════════════════════════════════════════════════════════════════════
+  static Future<String?> resetPassword({
+    required String email,
+    required String code,
+    required String newPassword,
+    required String confirmPassword,
+  }) async {
+    if (code.trim().isEmpty) return 'Reset code is required.';
+    final passErr = validatePassword(newPassword);
+    if (passErr != null) return passErr;
+    final confirmErr = validateConfirmPassword(newPassword, confirmPassword);
+    if (confirmErr != null) return confirmErr;
+
+    return await ApiService.resetPassword(
+      email:       email.trim().toLowerCase(),
+      code:        code.trim(),
+      newPassword: newPassword.trim(),
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -365,107 +360,29 @@ class AuthService {
   static Future<String?> sendPasswordReset({required String email}) async {
     final emailErr = validateEmail(email);
     if (emailErr != null) return emailErr;
-
-    final normalised = email.trim().toLowerCase();
-
-    // On Android/iOS Firebase SDK is initialized — use it directly.
-    if (isSupported) {
-      try {
-        await FirebaseAuth.instance.sendPasswordResetEmail(email: normalised);
-        return null;
-      } on FirebaseAuthException catch (e) {
-        return _errorMessage(e.code);
-      } catch (_) {
-        return 'An unexpected error occurred. Please try again.';
-      }
-    }
-
-    // On Windows/desktop Firebase is not initialized, so call the REST API
-    // directly. This is the same endpoint the SDK uses internally.
-    try {
-      final uri = Uri.parse(
-        'https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode'
-        '?key=$_firebaseApiKey',
-      );
-      final response = await http.post(
-        uri,
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'requestType': 'PASSWORD_RESET',
-          'email': normalised,
-        }),
-      );
-
-      // DEBUG — remove after confirming it works
-      print('[PasswordReset] status=${response.statusCode} body=${response.body}');
-
-      if (response.statusCode == 200) return null;
-
-      // Parse Firebase error from response body
-      final body = json.decode(response.body) as Map<String, dynamic>;
-      final code = (body['error']?['message'] as String? ?? '').toLowerCase();
-      if (code.contains('email_not_found') || code.contains('user_not_found')) {
-        return 'No account found with this email.';
-      }
-      if (code.contains('invalid_email')) {
-        return 'Please enter a valid email address.';
-      }
-      if (code.contains('too_many_attempts')) {
-        return 'Too many attempts. Please try again later.';
-      }
-      return 'Failed to send reset email. Please try again ($code)';
-    } catch (e) {
-      print('[PasswordReset] exception: $e');
-      return 'Network error. Please check your connection.';
-    }
+    return await ApiService.sendPasswordReset(email: email.trim().toLowerCase());
   }
 
   // ══════════════════════════════════════════════════════════════════════════
   // LOGOUT
   // ══════════════════════════════════════════════════════════════════════════
   static Future<void> logout() async {
-    _windowsLoggedInEmail = null;
+    _loggedInEmail = null;
     _cachedDisplayName = null;
+    _profileSetupDone = false;
+    displayNameNotifier.value = 'User';
+    ApiService.clearToken();
+    isLoggedInNotifier.value = false;
+    await _clearSession();
     try {
       final file = _nameFile();
       if (await file.exists()) await file.delete();
     } catch (_) {}
-    if (!isSupported) return;
-    try {
-      await _googleSignIn.signOut();
-    } catch (_) {}
-    await _auth.signOut();
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  // ERROR MESSAGES
-  // ══════════════════════════════════════════════════════════════════════════
-  static String _errorMessage(String code) {
-    switch (code) {
-      case 'user-not-found':
-        return 'No account found with this email. Please sign up first.';
-      case 'wrong-password':
-        return 'Incorrect password. Please try again.';
-      case 'email-already-in-use':
-        return 'An account already exists with this email. Please log in.';
-      case 'invalid-email':
-        return 'Please enter a valid email address.';
-      case 'weak-password':
-        return 'Password must be at least 8 characters with uppercase, lowercase and number.';
-      case 'user-disabled':
-        return 'This account has been disabled. Contact support.';
-      case 'too-many-requests':
-        return 'Too many failed attempts. Please try again later.';
-      case 'network-request-failed':
-        return 'Network error. Please check your connection.';
-      case 'invalid-credential':
-        return 'Invalid email or password. Please try again.';
-      case 'account-exists-with-different-credential':
-        return 'An account already exists with a different sign-in method.';
-      case 'requires-recent-login':
-        return 'Please log in again to continue.';
-      default:
-        return 'Authentication failed. Please try again.';
-    }
-  }
+  // ── Compatibility getters ──────────────────────────────────────────────────
+  static bool get isSupported => true;
+  static dynamic get currentUser => null;
+  static String? get windowsEmail => _loggedInEmail;
+  static bool get isEmailVerified => true;
 }

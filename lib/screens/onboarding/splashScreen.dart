@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
+import '../../core/auth_service.dart';
+import 'profile_setup_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -61,10 +63,21 @@ class _SplashScreenState extends State<SplashScreen>
       if (mounted) _progressController.forward();
     });
 
-    // Navigate to login after exactly 3 seconds
+    // Navigate after 3 seconds — check if already logged in
     Timer(const Duration(milliseconds: 3000), () {
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed('/login');
+        if (AuthService.isLoggedInNotifier.value) {
+          if (AuthService.profileSetupDone) {
+            Navigator.of(context).pushReplacementNamed('/home');
+          } else {
+            Navigator.of(context).pushReplacement(
+              MaterialPageRoute(
+                  builder: (_) => const ProfileSetupScreen()),
+            );
+          }
+        } else {
+          Navigator.of(context).pushReplacementNamed('/login');
+        }
       }
     });
   }

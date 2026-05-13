@@ -3,10 +3,18 @@ import 'signup_screen.dart';
 import 'forgot_password_screen.dart';
 import '../../core/auth_service.dart';
 import '../home/home_screen.dart';
+import '../onboarding/profile_setup_screen.dart';
 import '../../core/app_flushbar.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
+
+  /// Clears saved credentials — call after signup.
+  static void clearSavedCredentials() {
+    _LoginScreenState._savedEmail    = '';
+    _LoginScreenState._savedPassword = '';
+    _LoginScreenState._savedRemember = false;
+  }
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -20,6 +28,11 @@ class _LoginScreenState extends State<LoginScreen>
   bool _obscurePassword = true;
   bool _isLoading       = false;
   bool _rememberMe      = false;
+
+  // Remember Me — saved credentials (in-memory + file)
+  static String _savedEmail    = '';
+  static String _savedPassword = '';
+  static bool   _savedRemember = false;
 
   // Inline validation errors
   String? _emailError;
@@ -53,6 +66,12 @@ class _LoginScreenState extends State<LoginScreen>
       end: Offset.zero,
     ).animate(CurvedAnimation(parent: _animController, curve: Curves.easeOut));
     _animController.forward();
+
+    if (_savedRemember && _savedEmail.isNotEmpty) {
+      _emailController.text    = _savedEmail;
+      _passwordController.text = _savedPassword;
+      _rememberMe = true;
+    }
   }
 
   @override
@@ -92,131 +111,41 @@ class _LoginScreenState extends State<LoginScreen>
 
     setState(() => _isLoading = true);
     final error = await AuthService.login(
-      email:    _emailController.text,
-      password: _passwordController.text,
+      email:      _emailController.text,
+      password:   _passwordController.text,
+      rememberMe: _rememberMe,
     );
     if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (error == null) {
-      Navigator.pushAndRemoveUntil(
-        context,
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-        (_) => false,
-      );
-    } else if (error == 'email-not-verified') {
-      _showVerificationDialog();
+      if (_rememberMe) {
+        _savedEmail    = _emailController.text.trim();
+        _savedPassword = _passwordController.text.trim();
+        _savedRemember = true;
+      } else {
+        _savedEmail    = '';
+        _savedPassword = '';
+        _savedRemember = false;
+      }
+      if (!AuthService.profileSetupDone) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const ProfileSetupScreen()),
+          (_) => false,
+        );
+      } else {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (_) => false,
+        );
+      }
     } else {
       showFlushbar(context, error);
     }
   }
 
-  void _showVerificationDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) {
-        bool sending = false;
-        return StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            backgroundColor: kCard,
-            title: const Text(
-              'Verify your email',
-              style: TextStyle(
-                fontFamily: 'Poppins',
-                fontWeight: FontWeight.w700,
-                color: kPrimary,
-                fontSize: 18,
-              ),
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'We sent a verification link to\n${_emailController.text.trim()}',
-                  style: const TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 13,
-                    color: Color(0xFF444444),
-                    height: 1.5,
-                  ),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'Please check your inbox (and spam folder) and click the link before logging in.',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    fontSize: 12,
-                    color: Color(0xFF888888),
-                    height: 1.5,
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text(
-                  'OK',
-                  style: TextStyle(
-                    fontFamily: 'Poppins',
-                    color: kPrimary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: sending
-                    ? null
-                    : () async {
-                        setDialogState(() => sending = true);
-                        final err = await AuthService.resendVerificationEmail(
-                          email: _emailController.text,
-                          password: _passwordController.text,
-                        );
-                        if (!ctx.mounted) return;
-                        setDialogState(() => sending = false);
-                        Navigator.pop(ctx);
-                        if (err == 'already-verified') {
-                          showFlushbar(
-                            context,
-                            'Your email is already verified. Please log in.',
-                            isError: false,
-                          );
-                        } else if (err != null) {
-                          showFlushbar(context, err);
-                        } else {
-                          showFlushbar(
-                            context,
-                            'Verification email resent! Check your inbox.',
-                            isError: false,
-                          );
-                        }
-                      },
-                child: sending
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: kPrimary),
-                      )
-                    : const Text(
-                        'Resend email',
-                        style: TextStyle(
-                          fontFamily: 'Poppins',
-                          color: kPrimary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -263,7 +192,8 @@ class _LoginScreenState extends State<LoginScreen>
                     ),
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(28, 32, 28, 32),
-                      child: Column(
+                      child: AutofillGroup(
+                        child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Title + star
@@ -295,12 +225,17 @@ class _LoginScreenState extends State<LoginScreen>
 
                           const SizedBox(height: 32),
 
+                          // AutofillGroup — email suggestions enable karta hai
+                          AutofillGroup(
+                            child: Column(
+                              children: [
                           // Email field
                           _buildField(
                             controller: _emailController,
                             hint: 'Email',
                             icon: Icons.email_outlined,
                             keyboardType: TextInputType.emailAddress,
+                            autofillHints: const [AutofillHints.email],
                             errorText: _emailError,
                             onChanged: (_) {
                               if (_emailError != null) setState(() => _emailError = null);
@@ -315,6 +250,7 @@ class _LoginScreenState extends State<LoginScreen>
                             hint: 'Password',
                             icon: Icons.lock_outline_rounded,
                             obscure: _obscurePassword,
+                            autofillHints: const [AutofillHints.password],
                             errorText: _passwordError,
                             onChanged: (_) {
                               if (_passwordError != null) setState(() => _passwordError = null);
@@ -328,6 +264,9 @@ class _LoginScreenState extends State<LoginScreen>
                                 color: kPrimary.withValues(alpha: 0.45),
                                 size: 18,
                               ),
+                            ),
+                          ),
+                              ],
                             ),
                           ),
 
@@ -499,6 +438,7 @@ class _LoginScreenState extends State<LoginScreen>
                             ),
                           ),
                         ],
+                        ),
                       ),
                     ),
                   ),
@@ -523,6 +463,7 @@ class _LoginScreenState extends State<LoginScreen>
     Widget? suffix,
     String? errorText,
     ValueChanged<String>? onChanged,
+    List<String>? autofillHints,
   }) {
     final hasError = errorText != null && errorText.isNotEmpty;
     return Column(
@@ -553,6 +494,7 @@ class _LoginScreenState extends State<LoginScreen>
                   obscureText: obscure,
                   keyboardType: keyboardType,
                   onChanged: onChanged,
+                  autofillHints: autofillHints,
                   style: const TextStyle(
                       fontFamily: 'Poppins', fontSize: 15, color: kBg),
                   decoration: InputDecoration(

@@ -122,9 +122,10 @@ class _SignupScreenState extends State<SignupScreen>
       // Server / auth error â†’ flushbar
       showFlushbar(context, error);
     } else {
-      showFlushbar(context, 'Check your email to verify your account before logging in.', isError: false);
+      showFlushbar(context, 'Account created! You can now log in.', isError: false);
       await Future.delayed(const Duration(seconds: 1));
       if (mounted) {
+        LoginScreen.clearSavedCredentials();
         Navigator.pushAndRemoveUntil(
           context,
           MaterialPageRoute(builder: (_) => const LoginScreen()),

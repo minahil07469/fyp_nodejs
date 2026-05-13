@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'avatar_picker_screen.dart';
 import '../details/mic_check_screen.dart';
 import 'date_picker_screen.dart';
+import '../../core/auth_service.dart';
+import '../home/home_screen.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});
@@ -112,12 +114,17 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                         )),
                         const SizedBox(width: 6),
                         GestureDetector(
-                          onTap: () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AvatarPickerScreen(),
-                            ),
-                          ),
+                          onTap: () async {
+                            final picked = await Navigator.push<int>(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => const AvatarPickerScreen(),
+                              ),
+                            );
+                            if (picked != null) {
+                              setState(() => _selectedAvatar = picked);
+                            }
+                          },
                           child: Icon(Icons.expand_more_rounded,
                               color: kPrimary, size: 22),
                         ),
@@ -167,12 +174,21 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
               padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
               child: Center(
                 child: ElevatedButton(
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const MicCheckScreen(),
-                    ),
-                  ),
+                  onPressed: () async {
+                    // Save selected avatar
+                    await AuthService.updateAvatar(_avatarAssets[_selectedAvatar]);
+                    if (_nameController.text.trim().isNotEmpty) {
+                      await AuthService.updateDisplayName(
+                          _nameController.text.trim());
+                    }
+                    await AuthService.markProfileSetupDone();
+                    if (!context.mounted) return;
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                      (_) => false,
+                    );
+                  },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: kDoneBtn,
                     foregroundColor: kDoneTxt,

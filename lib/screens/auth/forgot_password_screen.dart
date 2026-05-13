@@ -1,6 +1,7 @@
 ﻿import 'dart:math';
 import 'package:flutter/material.dart';
 import 'signup_screen.dart';
+import 'reset_password_screen.dart';
 import '../../core/auth_service.dart';
 import '../../core/app_flushbar.dart';
 
@@ -223,7 +224,22 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                 if (error != null) {
                                   showFlushbar(context, error);
                                 } else {
-                                  showFlushbar(context, '\u2705 Reset link sent! Check your email (including spam).', isError: false);
+                                  showFlushbar(
+                                    context,
+                                    '✅ Reset code sent! Check your email.',
+                                    isError: false,
+                                  );
+                                  await Future.delayed(const Duration(seconds: 1));
+                                  if (mounted) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => ResetPasswordScreen(
+                                          email: _emailController.text.trim().toLowerCase(),
+                                        ),
+                                      ),
+                                    );
+                                  }
                                 }
                               },
                               style: ElevatedButton.styleFrom(
@@ -316,7 +332,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                                 email: _emailController.text,
                               );
                               if (!mounted) return;
-                              showFlushbar(context, error ?? '\u2705 Reset link resent! Check your email.', isError: error != null);
+                              showFlushbar(context, error ?? '✅ Reset email sent! Check your inbox.', isError: error != null);
                             },
                             child: const Text(
                               'Resend link',

@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import '../../core/app_nav.dart';
 import '../../main.dart';
 import '../../core/auth_service.dart';
-import '../auth/login_screen.dart';
 import '../../core/app_flushbar.dart';
+import '../auth/login_screen.dart';
+import '../onboarding/avatar_picker_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -25,13 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     'English', 'Urdu', 'Arabic', 'French', 'Spanish', 'German'
   ];
 
-  String get _email {
-    if (AuthService.isSupported) {
-      return AuthService.currentUser?.email ?? 'user@example.com';
-    }
-    // Windows: use the logged-in email from local registry
-    return AuthService.windowsEmail ?? 'user@example.com';
-  }
+  String get _email => AuthService.windowsEmail ?? 'user@example.com';
 
   @override
   void initState() {
@@ -221,22 +216,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
           // Avatar
           Stack(
             children: [
-              Container(
-                width: 88,
-                height: 88,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: kPrimary,
-                  border: Border.all(color: kYellow, width: 3),
-                ),
-                child: ClipOval(
-                  child: Image.asset(
-                    'assets/avator/avator1.png',
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) => const Icon(
-                      Icons.person_rounded,
-                      color: Colors.white,
-                      size: 44,
+              ValueListenableBuilder<String>(
+                valueListenable: AuthService.avatarNotifier,
+                builder: (_, avatarPath, __) => Container(
+                  width: 88,
+                  height: 88,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: kPrimary,
+                    border: Border.all(color: kYellow, width: 3),
+                  ),
+                  child: ClipOval(
+                    child: Image.asset(
+                      avatarPath,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, __, ___) => const Icon(
+                        Icons.person_rounded,
+                        color: Colors.white,
+                        size: 44,
+                      ),
                     ),
                   ),
                 ),
@@ -245,7 +243,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 bottom: 0,
                 right: 0,
                 child: GestureDetector(
-                  onTap: () {},
+                  onTap: () async {
+                    await Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const AvatarPickerScreen()),
+                    );
+                  },
                   child: Container(
                     width: 28,
                     height: 28,
@@ -498,13 +502,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
             onPressed: () async {
               Navigator.pop(context); // close dialog
               await AuthService.logout();
-              // On Android/iOS: AuthGate stream auto-redirects
-              // On Windows: manually navigate to LoginScreen
               if (mounted) {
                 Navigator.pushAndRemoveUntil(
                   context,
-                  MaterialPageRoute(
-                      builder: (_) => const LoginScreen()),
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
                   (_) => false,
                 );
               }

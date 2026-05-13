@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../core/app_nav.dart';
+import '../../core/auth_service.dart';
+import '../../services/api_service.dart';
+import '../../core/app_flushbar.dart';
 
 class SupportScreen extends StatefulWidget {
   const SupportScreen({super.key});
@@ -15,6 +18,7 @@ class _SupportScreenState extends State<SupportScreen> {
   int _navIndex      = 2;
   int _expandedFaq   = -1;
   bool _submitted    = false;
+  bool _isLoading    = false;
 
   // ── Colours ────────────────────────────────────────────────────────────────
   static const Color kBg       = Color(0xFFF5F0FF);
@@ -268,10 +272,24 @@ class _SupportScreenState extends State<SupportScreen> {
           width: double.infinity,
           height: 50,
           child: ElevatedButton(
-            onPressed: () {
-              if (_nameCtrl.text.isNotEmpty &&
-                  _emailCtrl.text.isNotEmpty &&
-                  _messageCtrl.text.isNotEmpty) {
+            onPressed: _isLoading ? null : () async {
+              if (_nameCtrl.text.trim().isEmpty ||
+                  _emailCtrl.text.trim().isEmpty ||
+                  _messageCtrl.text.trim().isEmpty) {
+                showFlushbar(context, 'Please fill all fields.');
+                return;
+              }
+              setState(() => _isLoading = true);
+              final error = await ApiService.sendSupportMessage(
+                name:    _nameCtrl.text.trim(),
+                email:   _emailCtrl.text.trim(),
+                message: _messageCtrl.text.trim(),
+              );
+              if (!mounted) return;
+              setState(() => _isLoading = false);
+              if (error != null) {
+                showFlushbar(context, error);
+              } else {
                 setState(() => _submitted = true);
               }
             },
@@ -283,13 +301,19 @@ class _SupportScreenState extends State<SupportScreen> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            child: const Text(
-              'Send Message',
-              style: TextStyle(
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+            child: _isLoading
+                ? const SizedBox(
+                    width: 22, height: 22,
+                    child: CircularProgressIndicator(
+                        color: Colors.white, strokeWidth: 2),
+                  )
+                : const Text(
+                    'Send Message',
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
           ),
         ),
       ],

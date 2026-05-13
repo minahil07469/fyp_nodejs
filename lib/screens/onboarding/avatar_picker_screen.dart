@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/auth_service.dart';
 
 class AvatarPickerScreen extends StatefulWidget {
   const AvatarPickerScreen({super.key});
@@ -115,7 +116,10 @@ class _AvatarPickerScreenState extends State<AvatarPickerScreen> {
                     width: double.infinity,
                     height: 56,
                     child: ElevatedButton(
-                      onPressed: () {},
+                      onPressed: () async {
+                        await AuthService.updateAvatar(_avatars[_selected]);
+                        if (context.mounted) Navigator.pop(context);
+                      },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: kBtn,
                         foregroundColor: Colors.white,
